@@ -69,6 +69,9 @@ build-all:
 	cd dist; for file in gdu_linux_* gdu_darwin_* gdu_netbsd_* gdu_openbsd_* gdu_freebsd_* gdu_android_*; do tar czf $$file.tgz $$file; done
 	cd dist; for file in gdu_windows_*; do zip $$file.zip $$file; done
 
+genpb:
+	protoc --go_out=. ./pkg/storage/item.proto
+
 gdu.1: gdu.1.md
 	sed 's/{{date}}/$(DATE)/g' gdu.1.md > gdu.1.date.md
 	pandoc gdu.1.date.md -s -t man > gdu.1
@@ -92,7 +95,7 @@ coverage-html: coverage
 	go tool cover -html=coverage.txt
 
 gobench:
-	go test -bench=. $(PACKAGE)/pkg/analyze
+	go test -bench=. ./...
 
 benchmark:
 	hyperfine --export-markdown=bench-cold.md \
