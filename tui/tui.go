@@ -32,6 +32,7 @@ Item under cursor:
                [::b]d    [white:black:-]Delete file or directory
                [::b]e    [white:black:-]Empty file or directory
                [::b]v    [white:black:-]Show content of file
+               [::b]o    [white:black:-]Open file or directory in external program
                [::b]i    [white:black:-]Show info about item
 
 Sort by (twice toggles asc/desc):
@@ -43,37 +44,45 @@ Sort by (twice toggles asc/desc):
 // UI struct
 type UI struct {
 	*common.UI
-	app             common.TermApplication
-	screen          tcell.Screen
-	output          io.Writer
-	header          *tview.TextView
-	footer          *tview.Flex
-	footerLabel     *tview.TextView
-	currentDirLabel *tview.TextView
-	pages           *tview.Pages
-	progress        *tview.TextView
-	help            *tview.Flex
-	table           *tview.Table
-	filteringInput  *tview.InputField
-	currentDir      fs.Item
-	devices         []*device.Device
-	topDir          fs.Item
-	topDirPath      string
-	currentDirPath  string
-	askBeforeDelete bool
-	showItemCount   bool
-	showMtime       bool
-	filtering       bool
-	filterValue     string
-	sortBy          string
-	sortOrder       string
-	done            chan struct{}
-	remover         func(fs.Item, fs.Item) error
-	emptier         func(fs.Item, fs.Item) error
-	getter          device.DevicesInfoGetter
-	exec            func(argv0 string, argv []string, envv []string) error
-	linkedItems     fs.HardLinkedItems
+	app                     common.TermApplication
+	screen                  tcell.Screen
+	output                  io.Writer
+	header                  *tview.TextView
+	footer                  *tview.Flex
+	footerLabel             *tview.TextView
+	currentDirLabel         *tview.TextView
+	pages                   *tview.Pages
+	progress                *tview.TextView
+	help                    *tview.Flex
+	table                   *tview.Table
+	filteringInput          *tview.InputField
+	currentDir              fs.Item
+	devices                 []*device.Device
+	topDir                  fs.Item
+	topDirPath              string
+	currentDirPath          string
+	askBeforeDelete         bool
+	showItemCount           bool
+	showMtime               bool
+	filtering               bool
+	filterValue             string
+	sortBy                  string
+	sortOrder               string
+	done                    chan struct{}
+	remover                 func(fs.Item, fs.Item) error
+	emptier                 func(fs.Item, fs.Item) error
+	getter                  device.DevicesInfoGetter
+	exec                    func(argv0 string, argv []string, envv []string) error
+	linkedItems             fs.HardLinkedItems
+	selectedTextColor       tcell.Color
+	selectedBackgroundColor tcell.Color
+	currentItemNameMaxLen   int
+	defaultSortBy           string
+	defaultSortOrder        string
 }
+
+// Option is optional function customizing the bahaviour of UI
+type Option func(ui *UI)
 
 // CreateUI creates the whole UI app
 func CreateUI(
@@ -85,6 +94,7 @@ func CreateUI(
 	showRelativeSize bool,
 	constGC bool,
 	useSIPrefix bool,
+	opts ...Option,
 ) *UI {
 	ui := &UI{
 		UI: &common.UI{
@@ -95,16 +105,25 @@ func CreateUI(
 			ConstGC:          constGC,
 			UseSIPrefix:      useSIPrefix,
 		},
-		app:             app,
-		screen:          screen,
-		output:          output,
-		askBeforeDelete: true,
-		showItemCount:   false,
-		remover:         analyze.RemoveItemFromDir,
-		emptier:         analyze.EmptyFileFromDir,
-		exec:            Execute,
-		linkedItems:     make(fs.HardLinkedItems, 10),
+		app:                     app,
+		screen:                  screen,
+		output:                  output,
+		askBeforeDelete:         true,
+		showItemCount:           false,
+		remover:                 analyze.RemoveItemFromDir,
+		emptier:                 analyze.EmptyFileFromDir,
+		exec:                    Execute,
+		linkedItems:             make(fs.HardLinkedItems, 10),
+		selectedTextColor:       tview.Styles.TitleColor,
+		selectedBackgroundColor: tview.Styles.MoreContrastBackgroundColor,
+		currentItemNameMaxLen:   70,
+		defaultSortBy:           "size",
+		defaultSortOrder:        "desc",
 	}
+	for _, o := range opts {
+		o(ui)
+	}
+
 	ui.resetSorting()
 
 	app.SetBeforeDrawFunc(func(screen tcell.Screen) bool {
@@ -113,6 +132,7 @@ func CreateUI(
 	})
 
 	ui.app.SetInputCapture(ui.keyPressed)
+	ui.app.SetMouseCapture(ui.onMouse)
 
 	var textColor, textBgColor tcell.Color
 	if ui.UseColors {
@@ -136,9 +156,10 @@ func CreateUI(
 	ui.table.SetBackgroundColor(tcell.ColorDefault)
 
 	if ui.UseColors {
+
 		ui.table.SetSelectedStyle(tcell.Style{}.
-			Foreground(tview.Styles.TitleColor).
-			Background(tview.Styles.MoreContrastBackgroundColor).Bold(true))
+			Foreground(ui.selectedTextColor).
+			Background(ui.selectedBackgroundColor).Bold(true))
 	} else {
 		ui.table.SetSelectedStyle(tcell.Style{}.
 			Foreground(tcell.ColorWhite).
@@ -168,14 +189,30 @@ func CreateUI(
 	return ui
 }
 
+// SetSelectedTextColor sets the color for the highighted selected text
+func (ui *UI) SetSelectedTextColor(color tcell.Color) {
+	ui.selectedTextColor = color
+}
+
+// SetSelectedBackgroundColor sets the color for the highighted selected text
+func (ui *UI) SetSelectedBackgroundColor(color tcell.Color) {
+	ui.selectedBackgroundColor = color
+}
+
+// SetCurrentItemNameMaxLen sets the maximum length of the path of the currently processed item
+// to be shown in the progress modal
+func (ui *UI) SetCurrentItemNameMaxLen(len int) {
+	ui.currentItemNameMaxLen = len
+}
+
 // StartUILoop starts tview application
 func (ui *UI) StartUILoop() error {
 	return ui.app.Run()
 }
 
 func (ui *UI) resetSorting() {
-	ui.sortBy = "size"
-	ui.sortOrder = "desc"
+	ui.sortBy = ui.defaultSortBy
+	ui.sortOrder = ui.defaultSortOrder
 }
 
 func (ui *UI) rescanDir() {
@@ -224,6 +261,8 @@ func (ui *UI) deviceItemSelected(row, column int) {
 
 	ui.resetSorting()
 
+	ui.Analyzer.ResetProgress()
+	ui.linkedItems = make(fs.HardLinkedItems)
 	err = ui.AnalyzePath(selectedDevice.MountPoint, nil)
 	if err != nil {
 		ui.showErr("Error analyzing device", err)

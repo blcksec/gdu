@@ -69,8 +69,8 @@ func TestUpdateProgress(t *testing.T) {
 	defer simScreen.Fini()
 
 	ui := CreateUI(app, simScreen, &bytes.Buffer{}, false, false, false, false, false)
-	done := ui.Analyzer.GetDoneChan()
-	done <- struct{}{}
+	done := ui.Analyzer.GetDone()
+	done.Broadcast()
 	ui.updateProgress()
 	assert.True(t, true)
 }
@@ -170,7 +170,7 @@ func TestRescanDir(t *testing.T) {
 
 	<-ui.done // wait for analyzer
 
-	for _, f := range ui.app.(*testapp.MockedApp).UpdateDraws {
+	for _, f := range ui.app.(*testapp.MockedApp).GetUpdateDraws() {
 		f()
 	}
 
@@ -179,7 +179,7 @@ func TestRescanDir(t *testing.T) {
 
 	assert.Equal(t, 5, ui.table.GetRowCount())
 	assert.Contains(t, ui.table.GetCell(0, 0).Text, "/..")
-	assert.Contains(t, ui.table.GetCell(1, 0).Text, "aaa")
+	assert.Contains(t, ui.table.GetCell(1, 0).Text, "ccc")
 }
 
 func TestDirSelected(t *testing.T) {
@@ -202,7 +202,7 @@ func TestFileSelected(t *testing.T) {
 	ui.fileItemSelected(3, 0)
 
 	assert.Equal(t, 4, ui.table.GetRowCount())
-	assert.Contains(t, ui.table.GetCell(0, 0).Text, "aaa")
+	assert.Contains(t, ui.table.GetCell(0, 0).Text, "ccc")
 }
 
 func TestSelectedWithoutCurrentDir(t *testing.T) {
@@ -287,7 +287,7 @@ func TestDeleteSelected(t *testing.T) {
 
 	<-ui.done
 
-	for _, f := range ui.app.(*testapp.MockedApp).UpdateDraws {
+	for _, f := range ui.app.(*testapp.MockedApp).GetUpdateDraws() {
 		f()
 	}
 
@@ -309,7 +309,7 @@ func TestDeleteSelectedWithErr(t *testing.T) {
 
 	<-ui.done
 
-	for _, f := range ui.app.(*testapp.MockedApp).UpdateDraws {
+	for _, f := range ui.app.(*testapp.MockedApp).GetUpdateDraws() {
 		f()
 	}
 
@@ -389,7 +389,7 @@ func getAnalyzedPathMockedApp(t *testing.T, useColors, apparentSize bool, mocked
 
 	<-ui.done // wait for analyzer
 
-	for _, f := range ui.app.(*testapp.MockedApp).UpdateDraws {
+	for _, f := range ui.app.(*testapp.MockedApp).GetUpdateDraws() {
 		f()
 	}
 
